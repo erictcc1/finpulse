@@ -3,8 +3,9 @@
  * FinPulse Pro — 共用核心引擎 (app.js)
  * 職責：
  * 1. 本機資料庫 (db)、匯率表 (fxStore)、動態幣別表 (currencyRegistry) 讀寫
- * 2. 多幣別原幣核算與基準幣折算（缺匯率時安全顯示「未設匯率 / 匯率待填」）
- * 3. 共用頂部導航列、手機底部導航、全域匯率 Modal 與 4 大 KPI 卡片渲染
+ * 2. Google Drive API 直接讀寫同步引擎 (drive.file 最小安全權限，純前端免後端)
+ * 3. 多幣別原幣核算與基準幣折算（缺匯率時安全顯示「未設匯率 / 匯率待填」）
+ * 4. 共用頂部導航列、手機底部導航、全域匯率 Modal 與 4 大 KPI 卡片渲染
  * ============================================================================
  */
 
@@ -12,6 +13,8 @@ const STORAGE_KEY = 'finpulse_pro_multicurrency_v2';
 const FX_STORAGE_KEY = 'fx_rates_v1';
 const CURRENCY_REG_KEY = 'currency_registry_v1';
 const PROMOTE_DRAFT_KEY = 'finpulse_promote_draft_temp';
+const GDRIVE_CFG_KEY = 'finpulse_gdrive_cfg_v1';
+const GDRIVE_SYNC_FILENAME = 'FinPulse_Pro_Cloud_Sync.json';
 
 // 預設幣別登錄表（包含澳元 AUD 等常用幣別，並支援使用者動態新增任意幣別）
 const DEFAULT_CURRENCY_REGISTRY = {
@@ -222,6 +225,260 @@ function saveDatabase() {
 }
 
 // ============================================================================
+// Google Drive 直接讀寫同步引擎 (Google Identity Services + Drive REST API v3)
+// ============================================================================
+
+function loadGDriveConfig() {
+    try {
+        const raw = localStorage.getItem(GDRIVE_CFG_KEY);
+        return raw ? JSON.parse(raw) : { clientId: '', fileId: '', lastSyncTime: '', autoUploadOnSave: false };
+    } catch (e) {
+        return { clientId: '', fileId: '', lastSyncTime: '', autoUploadOnSave: false };
+    }
+}
+
+window.gdriveConfig = loadGDriveConfig();
+window.gdriveAccessToken = sessionStorage.getItem('fp_gdrive_token') || '';
+window.gdriveTokenExpiresAt = parseInt(sessionStorage.getItem('fp_gdrive_exp') || '0', 10);
+
+function saveGDriveConfig() {
+    localStorage.setItem(GDRIVE_CFG_KEY, JSON.stringify(window.gdriveConfig));
+}
+
+function ensureGoogleGsiScript() {
+    return new Promise((resolve, reject) => {
+        if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+            resolve();
+            return;
+        }
+        const existing = document.getElementById('google-gsi-script');
+        if (existing) {
+            existing.addEventListener('load', () => resolve());
+            existing.addEventListener('error', () => reject(new Error('無法載入 Google 授權元件')));
+            return;
+        }
+        const script = document.createElement('script');
+        script.id = 'google-gsi-script';
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error('無法連線至 Google 授權服務，請檢查網路'));
+        document.head.appendChild(script);
+    });
+}
+
+async function getValidGDriveToken(forcePrompt = false) {
+    const clientId = (window.gdriveConfig.clientId || '').trim();
+    if (!clientId) {
+        toggleCloudModal(true);
+        throw new Error('請先設定 Google OAuth Client ID');
+    }
+
+    const now = Date.now();
+    if (!forcePrompt && window.gdriveAccessToken && window.gdriveTokenExpiresAt > now + 60000) {
+        return window.gdriveAccessToken;
+    }
+
+    await ensureGoogleGsiScript();
+
+    return new Promise((resolve, reject) => {
+        try {
+            const tokenClient = window.google.accounts.oauth2.initTokenClient({
+                client_id: clientId,
+                scope: 'https://www.googleapis.com/auth/drive.file',
+                callback: (resp) => {
+                    if (resp.error) {
+                        reject(new Error(`Google 授權失敗: ${resp.error}`));
+                        return;
+                    }
+                    window.gdriveAccessToken = resp.access_token;
+                    const expiresInMs = (parseInt(resp.expires_in || '3599', 10)) * 1000;
+                    window.gdriveTokenExpiresAt = Date.now() + expiresInMs;
+                    sessionStorage.setItem('fp_gdrive_token', window.gdriveAccessToken);
+                    sessionStorage.setItem('fp_gdrive_exp', String(window.gdriveTokenExpiresAt));
+                    resolve(window.gdriveAccessToken);
+                }
+            });
+            tokenClient.requestAccessToken({ prompt: forcePrompt ? 'consent' : '' });
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+async function findOrCreateCloudFileId(token) {
+    // 1. 若已有快取 fileId，先確認該檔案仍存在且未被移入垃圾桶
+    if (window.gdriveConfig.fileId) {
+        const checkRes = await fetch(`https://www.googleapis.com/drive/v3/files/${window.gdriveConfig.fileId}?fields=id,trashed`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (checkRes.ok) {
+            const meta = await checkRes.json();
+            if (meta && !meta.trashed) return meta.id;
+        }
+    }
+
+    // 2. 搜尋雲端硬碟中同名的同步檔
+    const q = encodeURIComponent(`name='${GDRIVE_SYNC_FILENAME}' and trashed=false`);
+    const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!searchRes.ok) throw new Error('搜尋 Google Drive 同步檔案失敗');
+    const searchData = await searchRes.json();
+    if (searchData.files && searchData.files.length > 0) {
+        window.gdriveConfig.fileId = searchData.files[0].id;
+        saveGDriveConfig();
+        return searchData.files[0].id;
+    }
+
+    // 3. 若尚無檔案則建立一個新的空 JSON 檔
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            name: GDRIVE_SYNC_FILENAME,
+            mimeType: 'application/json'
+        })
+    });
+    if (!createRes.ok) throw new Error('在 Google Drive 建立同步檔案失敗');
+    const created = await createRes.json();
+    window.gdriveConfig.fileId = created.id;
+    saveGDriveConfig();
+    return created.id;
+}
+
+async function uploadToGoogleDrive() {
+    try {
+        showToast('正在連線 Google Drive 並上傳最新資料...');
+        const token = await getValidGDriveToken(false);
+        const fileId = await findOrCreateCloudFileId(token);
+
+        const payload = {
+            app: 'FinPulse Pro',
+            schemaVersion: 2,
+            syncedAt: new Date().toISOString(),
+            db: window.db,
+            fxStore: window.fxStore,
+            currencyRegistry: window.currencyRegistry
+        };
+
+        const uploadRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+            method: 'PATCH',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload, null, 2)
+        });
+
+        if (!uploadRes.ok) throw new Error(`上傳失敗 (HTTP ${uploadRes.status})`);
+
+        const nowStr = new Date().toLocaleString('zh-HK', { hour12: false });
+        window.gdriveConfig.lastSyncTime = `已上傳 ${nowStr}`;
+        saveGDriveConfig();
+        updateCloudStatusUI();
+        showToast(`☁️ 已成功寫入 Google Drive (${GDRIVE_SYNC_FILENAME})！`);
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || '上傳至 Google Drive 失敗', 'error');
+    }
+}
+
+async function downloadFromGoogleDrive() {
+    try {
+        showToast('正在從 Google Drive 讀取雲端資料...');
+        const token = await getValidGDriveToken(false);
+        const q = encodeURIComponent(`name='${GDRIVE_SYNC_FILENAME}' and trashed=false`);
+        const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!searchRes.ok) throw new Error('搜尋 Google Drive 檔案失敗');
+        const searchData = await searchRes.json();
+
+        if (!searchData.files || searchData.files.length === 0) {
+            showToast(`雲端硬碟中找不到 ${GDRIVE_SYNC_FILENAME}，請先執行一次「上傳至雲端」`, 'error');
+            return;
+        }
+
+        const fileId = searchData.files[0].id;
+        window.gdriveConfig.fileId = fileId;
+
+        const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!fileRes.ok) throw new Error(`讀取雲端檔案內容失敗 (HTTP ${fileRes.status})`);
+
+        const parsed = await fileRes.json();
+        const importedDb = parsed.db ? parsed.db : parsed;
+        if (!importedDb || !importedDb.accounts || !importedDb.cashflows || !importedDb.holdings) {
+            throw new Error('雲端檔案內容格式不符或為空');
+        }
+
+        window.db = { simDrafts: [], ...importedDb };
+        if (parsed.fxStore) {
+            window.fxStore = parsed.fxStore;
+            localStorage.setItem(FX_STORAGE_KEY, JSON.stringify(window.fxStore));
+        }
+        if (parsed.currencyRegistry) {
+            window.currencyRegistry = { ...DEFAULT_CURRENCY_REGISTRY, ...parsed.currencyRegistry };
+            saveCurrencyRegistry();
+        }
+        window.currencyRegistry = loadCurrencyRegistry();
+
+        const nowStr = new Date().toLocaleString('zh-HK', { hour12: false });
+        window.gdriveConfig.lastSyncTime = `已下載 ${nowStr}`;
+        saveGDriveConfig();
+        saveDatabase();
+        renderSharedChrome(window.CURRENT_PAGE_ID);
+        updateCloudStatusUI();
+        showToast('☁️ 已從 Google Drive 讀取並覆蓋更新本機資料！');
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || '從 Google Drive 讀取失敗', 'error');
+    }
+}
+
+function saveGDriveClientIdFromModal() {
+    const input = document.getElementById('gdrive-client-id-input');
+    if (!input) return;
+    window.gdriveConfig.clientId = input.value.trim();
+    saveGDriveConfig();
+    updateCloudStatusUI();
+    showToast('已儲存 Google OAuth Client ID！');
+}
+
+function toggleCloudModal(show) {
+    const modal = document.getElementById('cloud-sync-modal');
+    if (!modal) return;
+    if (show) {
+        const inp = document.getElementById('gdrive-client-id-input');
+        if (inp) inp.value = window.gdriveConfig.clientId || '';
+        updateCloudStatusUI();
+        modal.classList.remove('hidden');
+    } else {
+        modal.classList.add('hidden');
+    }
+}
+
+function updateCloudStatusUI() {
+    const statusText = document.getElementById('cloud-sync-status-text');
+    if (statusText) {
+        const hasId = !!(window.gdriveConfig.clientId || '').trim();
+        statusText.innerHTML = hasId
+            ? `狀態：<span class="text-emerald-400 font-semibold">已設定 Client ID</span> · ${window.gdriveConfig.lastSyncTime || '尚未執行同步'}`
+            : `狀態：<span class="text-amber-400 font-semibold">尚未設定 Google Client ID</span>（請參閱 GOOGLE_DRIVE_SETUP.md）`;
+    }
+    const headerBadge = document.getElementById('header-cloud-status');
+    if (headerBadge) {
+        headerBadge.textContent = (window.gdriveConfig.clientId || '').trim() ? '☁️ 雲端硬碟' : '☁️ 設定雲端';
+    }
+}
+
+// ============================================================================
 // 貨幣換算與格式化工具
 // ============================================================================
 
@@ -347,7 +604,7 @@ function calculateAccountDefaultFee(acc, principal) {
 }
 
 // ============================================================================
-// 共用導航列、幣別控制、匯率表 Modal 與 KPI 渲染
+// 共用導航列、幣別控制、匯率表 Modal、雲端硬碟 Modal 與 KPI 渲染
 // ============================================================================
 
 const NAV_ITEMS = [
@@ -366,13 +623,15 @@ function renderSharedChrome(activePageId) {
 
         const xlNavHtml = NAV_ITEMS.map(item => {
             const active = item.id === activePageId;
-            return `<a href="${item.href}" class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-terminal-accent text-white shadow' : 'text-terminal-muted hover:text-white'}">${item.icon} ${item.label}</a>`;
+            return `<a href="${item.href}" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-terminal-accent text-white shadow' : 'text-terminal-muted hover:text-white'}">${item.icon} ${item.label}</a>`;
         }).join('');
 
         const mdNavHtml = NAV_ITEMS.map(item => {
             const active = item.id === activePageId;
             return `<a href="${item.href}" class="px-3 py-1.5 rounded-lg text-xs font-medium transition ${active ? 'bg-terminal-accent text-white' : 'text-terminal-muted hover:text-white'}">${item.icon} ${item.label}</a>`;
         }).join('');
+
+        const hasCloudClientId = !!(window.gdriveConfig && (window.gdriveConfig.clientId || '').trim());
 
         headerHost.innerHTML = `
             <header class="glass-header sticky top-0 z-40 px-3 sm:px-4 py-2.5">
@@ -386,12 +645,11 @@ function renderSharedChrome(activePageId) {
                         <div>
                             <div class="flex items-center gap-2">
                                 <span class="font-bold text-base sm:text-lg text-white tracking-tight">FinPulse <span class="text-blue-400">Pro</span></span>
-                                <span class="text-[10px] sm:text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium flex items-center gap-1">
+                                <span class="hidden sm:flex text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium items-center gap-1">
                                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                                    0 Cloud Reads
+                                    本機 + Drive 雙模
                                 </span>
                             </div>
-                            <p class="text-[11px] text-terminal-muted hidden lg:block">多頁面模組架構 · 多幣別原幣核算 · GitHub Pages 就緒</p>
                         </div>
                     </a>
 
@@ -401,11 +659,11 @@ function renderSharedChrome(activePageId) {
 
                     <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
                         <div class="flex items-center bg-terminal-bg border border-terminal-border rounded-xl p-0.5 text-xs">
-                            <button onclick="setCurrencyDisplayMode('original')" class="px-2.5 py-1 rounded-lg font-medium transition ${window.currencyDisplayMode === 'original' ? 'bg-terminal-hover text-white' : 'text-terminal-muted hover:text-white'}">
-                                原幣分組
+                            <button onclick="setCurrencyDisplayMode('original')" class="px-2 py-1 rounded-lg font-medium transition ${window.currencyDisplayMode === 'original' ? 'bg-terminal-hover text-white' : 'text-terminal-muted hover:text-white'}">
+                                原幣
                             </button>
-                            <button onclick="setCurrencyDisplayMode('converted')" class="px-2.5 py-1 rounded-lg font-medium transition ${window.currencyDisplayMode === 'converted' ? 'bg-blue-600 text-white' : 'text-terminal-muted hover:text-white'}">
-                                折合基準幣
+                            <button onclick="setCurrencyDisplayMode('converted')" class="px-2 py-1 rounded-lg font-medium transition ${window.currencyDisplayMode === 'converted' ? 'bg-blue-600 text-white' : 'text-terminal-muted hover:text-white'}">
+                                折合
                             </button>
                             <select onchange="changeBaseCurrency(this.value)" title="選擇折合基準幣別" class="bg-transparent text-blue-400 font-mono font-bold text-xs px-1.5 py-1 focus:outline-none cursor-pointer">
                                 ${baseOptions}
@@ -413,8 +671,12 @@ function renderSharedChrome(activePageId) {
                         </div>
 
                         <button onclick="toggleFxModal(true)" class="px-2.5 py-1.5 rounded-xl bg-terminal-card hover:bg-terminal-hover border border-terminal-border text-xs font-medium text-amber-400 transition flex items-center gap-1">
-                            <span>💱 幣別與匯率</span>
-                            <span class="hidden sm:inline text-[10px] text-terminal-muted font-mono">${window.fxStore.updatedDate}</span>
+                            <span>💱 匯率</span>
+                            <span class="hidden md:inline text-[10px] text-terminal-muted font-mono">${window.fxStore.updatedDate}</span>
+                        </button>
+
+                        <button onclick="toggleCloudModal(true)" class="px-2.5 py-1.5 rounded-xl bg-terminal-card hover:bg-terminal-hover border ${hasCloudClientId ? 'border-blue-500/40 text-blue-300' : 'border-terminal-border text-terminal-text'} text-xs font-medium transition flex items-center gap-1">
+                            <span id="header-cloud-status">${hasCloudClientId ? '☁️ 雲端硬碟' : '☁️ 設定雲端'}</span>
                         </button>
                     </div>
                 </div>
@@ -489,6 +751,53 @@ function renderSharedChrome(activePageId) {
             </div>
         `;
         document.body.appendChild(modalDiv);
+    }
+
+    // 確保全域 Google Drive 雲端同步 Modal 存在於 DOM 中
+    if (!document.getElementById('cloud-sync-modal')) {
+        const cloudModal = document.createElement('div');
+        cloudModal.id = 'cloud-sync-modal';
+        cloudModal.className = 'hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4';
+        cloudModal.innerHTML = `
+            <div class="bg-terminal-card border border-terminal-border rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+                <div class="flex items-center justify-between pb-3 border-b border-terminal-border">
+                    <div>
+                        <h3 class="text-base font-bold text-white">☁️ Google Drive 雲端硬碟直接讀寫同步</h3>
+                        <p class="text-xs text-terminal-muted mt-0.5">使用最小安全權限 (drive.file)，僅讀寫專屬同步檔 ${GDRIVE_SYNC_FILENAME}</p>
+                    </div>
+                    <button onclick="toggleCloudModal(false)" class="text-terminal-muted hover:text-white p-1">✕</button>
+                </div>
+
+                <div id="cloud-sync-status-text" class="bg-terminal-bg px-3 py-2.5 rounded-xl border border-terminal-border text-xs text-terminal-text"></div>
+
+                <div class="space-y-1.5">
+                    <label class="block text-xs text-terminal-muted">Google OAuth 2.0 用戶端編號 (Client ID)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="gdrive-client-id-input" placeholder="貼上 xxxx.apps.googleusercontent.com" class="flex-1 bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-blue-500">
+                        <button type="button" onclick="saveGDriveClientIdFromModal()" class="px-3.5 py-2 rounded-xl bg-terminal-hover hover:bg-blue-600 border border-terminal-border text-xs font-semibold text-white transition">
+                            儲存 ID
+                        </button>
+                    </div>
+                    <p class="text-[11px] text-terminal-muted">初次使用請參考專案內的 <code class="text-blue-400">GOOGLE_DRIVE_SETUP.md</code> 免費申請一組 Client ID（約 2 分鐘）。</p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <button type="button" onclick="uploadToGoogleDrive()" class="py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-blue-900/30 transition flex items-center justify-center gap-1.5">
+                        <span>☁️⬆ 上傳並覆寫至雲端</span>
+                    </button>
+                    <button type="button" onclick="downloadFromGoogleDrive()" class="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-emerald-900/30 transition flex items-center justify-center gap-1.5">
+                        <span>☁️⬇ 從雲端讀取並還原</span>
+                    </button>
+                </div>
+
+                <div class="flex justify-end pt-1">
+                    <button type="button" onclick="toggleCloudModal(false)" class="px-4 py-2 rounded-xl bg-terminal-bg hover:bg-terminal-hover border border-terminal-border text-xs text-terminal-muted">
+                        關閉
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(cloudModal);
     }
 
     renderGlobalKPIs();
