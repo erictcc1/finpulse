@@ -999,3 +999,133 @@ function saveFxRates() {
     if (typeof window.onPageDataUpdated === 'function') window.onPageDataUpdated();
     showToast(`已更新本機匯率表 (${newDate})，零雲端流量消耗！`);
 }
+
+// === 款式 A 品牌圖示與 PWA Manifest 自動注入（涵蓋桌面捷徑 / iOS / Android） ===
+function generateStyleALogoDataUrl(size = 512) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const s = size / 512;
+
+  // 圓角深靛藍漸層背景
+  const r = 112 * s;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(size - r, 0);
+  ctx.quadraticCurveTo(size, 0, size, r);
+  ctx.lineTo(size, size - r);
+  ctx.quadraticCurveTo(size, size, size - r, size);
+  ctx.lineTo(r, size);
+  ctx.quadraticCurveTo(0, size, 0, size - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+
+  const bgGrad = ctx.createLinearGradient(0, 0, size, size);
+  bgGrad.addColorStop(0, '#0f172a');
+  bgGrad.addColorStop(1, '#1e293b');
+  ctx.fillStyle = bgGrad;
+  ctx.fill();
+
+  // 翡翠綠光暈
+  const glow = ctx.createRadialGradient(390 * s, 155 * s, 10 * s, 390 * s, 155 * s, 230 * s);
+  glow.addColorStop(0, 'rgba(16, 185, 129, 0.38)');
+  glow.addColorStop(1, 'rgba(16, 185, 129, 0)');
+  ctx.fillStyle = glow;
+  ctx.fill();
+
+  // 外框微光
+  ctx.strokeStyle = 'rgba(52, 211, 153, 0.25)';
+  ctx.lineWidth = 6 * s;
+  ctx.stroke();
+
+  // 金融脈動上升折線
+  const lineGrad = ctx.createLinearGradient(96 * s, 356 * s, 400 * s, 160 * s);
+  lineGrad.addColorStop(0, '#059669');
+  lineGrad.addColorStop(0.55, '#10b981');
+  lineGrad.addColorStop(1, '#34d399');
+
+  ctx.strokeStyle = lineGrad;
+  ctx.lineWidth = 34 * s;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(96 * s, 356 * s);
+  ctx.lineTo(188 * s, 284 * s);
+  ctx.lineTo(256 * s, 316 * s);
+  ctx.lineTo(396 * s, 164 * s);
+  ctx.stroke();
+
+  // 右上箭頭
+  ctx.strokeStyle = '#34d399';
+  ctx.beginPath();
+  ctx.moveTo(326 * s, 160 * s);
+  ctx.lineTo(400 * s, 160 * s);
+  ctx.lineTo(400 * s, 234 * s);
+  ctx.stroke();
+
+  // 脈動節點
+  [
+    [188, 284],
+    [256, 316]
+  ].forEach(([cx, cy]) => {
+    ctx.beginPath();
+    ctx.arc(cx * s, cy * s, 16 * s, 0, Math.PI * 2);
+    ctx.fillStyle = '#0f172a';
+    ctx.fill();
+    ctx.lineWidth = 10 * s;
+    ctx.strokeStyle = '#34d399';
+    ctx.stroke();
+  });
+
+  // 頂點光珠
+  ctx.beginPath();
+  ctx.arc(400 * s, 160 * s, 22 * s, 0, Math.PI * 2);
+  ctx.fillStyle = '#34d399';
+  ctx.fill();
+
+  return canvas.toDataURL('image/png');
+}
+
+function injectBrandIcons() {
+  if (typeof document === 'undefined') return;
+  const png512 = generateStyleALogoDataUrl(512);
+  const png192 = generateStyleALogoDataUrl(192);
+
+  const upsertLink = (rel, attrs) => {
+    let el = document.querySelector(`link[rel="${rel}"]`);
+    if (!el) {
+      el = document.createElement('link');
+      el.rel = rel;
+      document.head.appendChild(el);
+    }
+    Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+  };
+
+  upsertLink('icon', { type: 'image/png', sizes: '192x192', href: png192 });
+  upsertLink('shortcut icon', { type: 'image/png', href: png192 });
+  upsertLink('apple-touch-icon', { sizes: '512x512', href: png512 });
+
+  // 動態生成內含 PNG Data URL 的 Manifest（相容 Chrome / Edge 桌面與 Android PWA 安裝）
+  const manifestObj = {
+    name: 'FinPulse Pro · 資金定位與看盤總覽',
+    short_name: 'FinPulse Pro',
+    start_url: window.location.origin + window.location.pathname.replace(/[^/]*$/, 'index.html'),
+    display: 'standalone',
+    background_color: '#0f172a',
+    theme_color: '#0f172a',
+    icons: [
+      { src: png192, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: png512, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+    ]
+  };
+  const manifestBlob = new Blob([JSON.stringify(manifestObj)], { type: 'application/manifest+json' });
+  upsertLink('manifest', { href: URL.createObjectURL(manifestBlob) });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', injectBrandIcons);
+} else {
+  injectBrandIcons();
+}
