@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0b0e14">
-    <title>平台與手續費設定 · FinPulse Pro</title>
+    <title>平台與雲端同步設定 · FinPulse Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,6 +37,41 @@
 
     <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 pt-5 space-y-6">
         <div id="shared-kpis"></div>
+
+        <!-- Google Drive 雲端硬碟直接讀寫同步專區 -->
+        <section class="bg-terminal-card border border-blue-500/40 rounded-2xl p-4 sm:p-5 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-terminal-border">
+                <div>
+                    <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                        <span>☁️ Google Drive 雲端硬碟直接讀寫同步</span>
+                        <span class="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">跨裝置無縫接軌</span>
+                    </h2>
+                    <p class="text-xs text-terminal-muted mt-0.5">直接讀寫你 Google 雲端硬碟中的 <code class="text-blue-400">FinPulse_Pro_Cloud_Sync.json</code>，僅要求最小授權 (<code class="text-emerald-400">drive.file</code>)，不存取其他私人檔案</p>
+                </div>
+                <div id="page-cloud-sync-badge" class="text-xs font-mono text-amber-400"></div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
+                <div class="lg:col-span-6 space-y-1.5">
+                    <label class="block text-xs text-terminal-muted">Google OAuth 2.0 Client ID（於 Google Cloud Console 免費建立）</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="page-gdrive-client-id" placeholder="貼上 xxxx.apps.googleusercontent.com" class="flex-1 bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-blue-500">
+                        <button type="button" onclick="savePageGDriveClientId()" class="px-4 py-2 rounded-xl bg-terminal-hover hover:bg-blue-600 border border-terminal-border text-xs font-semibold text-white transition shrink-0">
+                            儲存設定
+                        </button>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-6 grid grid-cols-2 gap-3">
+                    <button type="button" onclick="uploadToGoogleDrive()" class="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-blue-900/30 transition">
+                        ☁️⬆ 上傳至 Google Drive
+                    </button>
+                    <button type="button" onclick="downloadFromGoogleDrive()" class="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-emerald-900/30 transition">
+                        ☁️⬇ 從 Google Drive 讀取
+                    </button>
+                </div>
+            </div>
+        </section>
 
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <!-- 新增戶口與平台手續費規則表單 -->
@@ -112,10 +147,10 @@
                         <h3 class="text-base font-bold text-white">📑 已建立的銀行與投資平台清單</h3>
                         <div class="flex flex-wrap items-center gap-2">
                             <button onclick="exportBackupJSON()" class="text-xs px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 transition">
-                                ⬇ 匯出 JSON 備份
+                                ⬇ 匯出本機 JSON
                             </button>
                             <label class="cursor-pointer text-xs px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 transition">
-                                ⬆ 還原備份
+                                ⬆ 匯入本機 JSON
                                 <input type="file" accept=".json" onchange="importBackupJSON(event)" class="hidden">
                             </label>
                             <button onclick="resetToDemoData()" class="text-xs px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition">
@@ -135,18 +170,25 @@
     <script>
         window.CURRENT_PAGE_ID = 'accounts';
 
-        // Fallback initializer when previewing accounts.html standalone without external app.js
-        if (typeof window.renderSharedChrome !== 'function') {
-            window.currencyRegistry = JSON.parse(localStorage.getItem('currency_registry_v1') || '{"HKD":{"code":"HKD","symbol":"HK$","label":"港幣"},"USD":{"code":"USD","symbol":"US$","label":"美元"},"AUD":{"code":"AUD","symbol":"A$","label":"澳元"},"JPY":{"code":"JPY","symbol":"¥","label":"日圓"}}');
-            window.db = JSON.parse(localStorage.getItem('finpulse_pro_multicurrency_v2') || '{"accounts":[],"cashflows":[],"holdings":[],"simDrafts":[]}');
-            window.getCurrencyDisplayOption = (c) => window.currencyRegistry[c] ? `${c} (${window.currencyRegistry[c].label})` : c;
-            window.getAccountDynamicBalance = (acc) => acc.initialBalance || 0;
-            window.saveDatabase = () => {
-                localStorage.setItem('finpulse_pro_multicurrency_v2', JSON.stringify(window.db));
-                if (typeof window.onPageDataUpdated === 'function') window.onPageDataUpdated();
-            };
-            window.showToast = (msg) => console.log('[FinPulse]', msg);
-            window.renderSharedChrome = () => {};
+        function syncPageCloudBox() {
+            const inp = document.getElementById('page-gdrive-client-id');
+            if (inp && window.gdriveConfig) {
+                inp.value = window.gdriveConfig.clientId || '';
+            }
+            const badge = document.getElementById('page-cloud-sync-badge');
+            if (badge && window.gdriveConfig) {
+                badge.textContent = window.gdriveConfig.lastSyncTime || (window.gdriveConfig.clientId ? '已就緒，可隨時同步' : '尚未填入 Client ID');
+            }
+        }
+
+        function savePageGDriveClientId() {
+            const inp = document.getElementById('page-gdrive-client-id');
+            if (!inp) return;
+            window.gdriveConfig.clientId = inp.value.trim();
+            saveGDriveConfig();
+            renderSharedChrome(window.CURRENT_PAGE_ID);
+            syncPageCloudBox();
+            showToast('已儲存 Google OAuth Client ID！');
         }
 
         function populateAccountCurrencyOptions() {
@@ -281,6 +323,7 @@
         window.onPageDataUpdated = function() {
             populateAccountCurrencyOptions();
             renderAccountsList();
+            syncPageCloudBox();
         };
 
         window.onload = function() {
