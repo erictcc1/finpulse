@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0b0e14">
+    <title>現金流與換匯 · FinPulse Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'Noto Sans TC', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: {
+                        terminal: {
+                            bg: '#0b0e14', card: '#131722', border: '#2a2e39', hover: '#1e222d',
+                            accent: '#2962ff', up: '#089981', down: '#f23645', warn: '#f59e0b',
+                            text: '#d1d4dc', muted: '#787b86'
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        body { background-color: #0b0e14; color: #d1d4dc; font-feature-settings: "tnum"; }
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+        .glass-header { background: rgba(19, 23, 34, 0.9); backdrop-filter: blur(12px); border-bottom: 1px solid #2a2e39; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col pb-24 md:pb-8">
+    <div id="shared-header"></div>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 pt-5 space-y-6">
+        <div id="shared-kpis"></div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- 左側：記帳 / 換匯雙模式面板 -->
+            <div class="lg:col-span-5 bg-terminal-card border border-terminal-border rounded-2xl p-4 sm:p-5 space-y-4">
+                <div class="grid grid-cols-2 gap-1.5 p-1 bg-terminal-bg rounded-xl border border-terminal-border">
+                    <button type="button" onclick="setEntrySubMode('standard')" id="submode-standard-btn" class="py-2 rounded-lg text-xs sm:text-sm font-bold bg-blue-600 text-white transition">
+                        ⚡ 一般入帳 / 支帳
+                    </button>
+                    <button type="button" onclick="setEntrySubMode('fx')" id="submode-fx-btn" class="py-2 rounded-lg text-xs sm:text-sm font-bold text-terminal-muted hover:text-white transition">
+                        💱 換匯 / 跨戶口轉帳
+                    </button>
+                </div>
+
+                <!-- 表單 A：一般入帳 / 支帳 -->
+                <form id="cashflow-form" onsubmit="handleAddCashflow(event)" class="space-y-3.5">
+                    <div class="grid grid-cols-2 gap-2 p-1 bg-terminal-bg rounded-xl border border-terminal-border">
+                        <label class="cursor-pointer">
+                            <input type="radio" name="cf-type" value="expense" checked class="peer hidden" onchange="updateCategoryOptions()">
+                            <div class="py-1.5 text-center text-xs sm:text-sm font-semibold rounded-lg text-terminal-muted peer-checked:bg-terminal-down peer-checked:text-white transition">
+                                - 支帳 / 花費
+                            </div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="cf-type" value="income" class="peer hidden" onchange="updateCategoryOptions()">
+                            <div class="py-1.5 text-center text-xs sm:text-sm font-semibold rounded-lg text-terminal-muted peer-checked:bg-terminal-up peer-checked:text-white transition">
+                                + 入帳 / 收益
+                            </div>
+                        </label>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">所屬銀行 / 平台戶口 (自動帶入該戶口幣別)</label>
+                        <select id="cf-account" onchange="syncCashflowAccountCurrency()" required class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"></select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-terminal-muted mb-1">分類項目</label>
+                            <select id="cf-category" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"></select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-terminal-muted mb-1">日期</label>
+                            <input type="date" id="cf-date" required class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="col-span-2">
+                            <label class="block text-xs text-terminal-muted mb-1">交易金額 (<span id="cf-currency-label" class="text-blue-400 font-mono">HKD</span>)</label>
+                            <input type="number" step="0.01" min="0.01" id="cf-amount" required placeholder="0.00" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-base font-mono font-bold text-white focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-terminal-muted mb-1">附加手續費</label>
+                            <input type="number" step="0.01" min="0" id="cf-fee" value="0" placeholder="0" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-amber-400 focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">備註說明</label>
+                        <input type="text" id="cf-note" placeholder="例如：午餐、富達美債派息、薪金..." class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <button type="submit" class="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm shadow-lg shadow-blue-900/30 transition">
+                        確認寫入現金流紀錄
+                    </button>
+                </form>
+
+                <!-- 表單 B：換匯 / 跨幣別轉帳 -->
+                <form id="fx-transfer-form" onsubmit="handleAddFxTransfer(event)" class="hidden space-y-3.5">
+                    <div class="bg-blue-500/10 border border-blue-500/25 rounded-xl p-2.5 text-[11px] text-blue-300">
+                        💡 換匯與內部轉帳會精準加減兩邊戶口原幣餘額，但<strong>不會</strong>灌水進日常收入/支出圖表；被收的手續費則會獨立計入摩擦成本。
+                    </div>
+
+                    <div class="bg-terminal-bg border border-terminal-border rounded-xl p-3 space-y-2">
+                        <div class="text-xs font-semibold text-rose-400">1. 轉出端 (賣出原幣)</div>
+                        <select id="fx-from-account" onchange="onFxAccountChange('from')" required class="w-full bg-terminal-card border border-terminal-border rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none"></select>
+                        <div class="flex items-center gap-2">
+                            <span id="fx-from-curr" class="font-mono text-xs font-bold px-2.5 py-2 rounded-lg bg-terminal-card border border-terminal-border text-rose-400">HKD</span>
+                            <input type="number" step="0.01" min="0.01" id="fx-from-amount" oninput="autoCalcFxInflow()" required placeholder="轉出金額" class="flex-1 bg-terminal-card border border-terminal-border rounded-lg px-3 py-1.5 text-sm font-mono font-bold text-white focus:outline-none">
+                        </div>
+                    </div>
+
+                    <div class="bg-terminal-bg border border-terminal-border rounded-xl p-3 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-emerald-400">2. 轉入端 (買入目標幣)</span>
+                            <span id="fx-implied-rate" class="text-[11px] font-mono text-terminal-muted">成交匯率: --</span>
+                        </div>
+                        <select id="fx-to-account" onchange="onFxAccountChange('to')" required class="w-full bg-terminal-card border border-terminal-border rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none"></select>
+                        <div class="flex items-center gap-2">
+                            <span id="fx-to-curr" class="font-mono text-xs font-bold px-2.5 py-2 rounded-lg bg-terminal-card border border-terminal-border text-emerald-400">USD</span>
+                            <input type="number" step="0.01" min="0.01" id="fx-to-amount" oninput="updateImpliedFxLabel()" required placeholder="實際入帳金額" class="flex-1 bg-terminal-card border border-terminal-border rounded-lg px-3 py-1.5 text-sm font-mono font-bold text-white focus:outline-none">
+                        </div>
+                    </div>
+
+                    <div class="bg-terminal-bg border border-amber-500/30 rounded-xl p-3 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-amber-400">3. 換匯 / 轉帳手續費 (獨立追蹤)</span>
+                            <span class="text-[10px] text-terminal-muted">可選不同幣別</span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <input type="number" step="0.01" min="0" id="fx-fee-amount" value="0" placeholder="手續費" class="col-span-2 bg-terminal-card border border-terminal-border rounded-lg px-2.5 py-1.5 text-sm font-mono text-amber-400 focus:outline-none">
+                            <select id="fx-fee-curr" class="bg-terminal-card border border-terminal-border rounded-lg px-2 py-1.5 text-xs font-mono text-white focus:outline-none"></select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-terminal-muted mb-1">手續費從哪個戶口扣除？</label>
+                            <select id="fx-fee-account" class="w-full bg-terminal-card border border-terminal-border rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none"></select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="date" id="fx-date" required class="bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none">
+                        <input type="text" id="fx-note" placeholder="備註 (如: 匯豐換美金電匯富達)" class="bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none">
+                    </div>
+
+                    <button type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-900/30 transition">
+                        確認執行換匯 / 跨戶口轉帳
+                    </button>
+                </form>
+            </div>
+
+            <!-- 右側：交易與換匯明細流水帳 -->
+            <div class="lg:col-span-7 bg-terminal-card border border-terminal-border rounded-2xl p-4 sm:p-5 flex flex-col">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <h3 class="text-base font-bold text-white">📋 收支與換匯明細流水帳</h3>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <select id="filter-cf-type" onchange="renderCashflows()" class="bg-terminal-bg border border-terminal-border rounded-lg px-2.5 py-1.5 text-xs text-white">
+                            <option value="ALL">全部類型</option>
+                            <option value="income">僅看入帳</option>
+                            <option value="expense">僅看支帳</option>
+                            <option value="transfer">僅看換匯轉帳</option>
+                        </select>
+                        <select id="filter-cf-account" onchange="renderCashflows()" class="bg-terminal-bg border border-terminal-border rounded-lg px-2.5 py-1.5 text-xs text-white">
+                            <option value="ALL">全部銀行與平台戶口</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto flex-1">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-terminal-border text-xs text-terminal-muted">
+                                <th class="py-2.5 px-2.5">日期 / 類型</th>
+                                <th class="py-2.5 px-2.5">資金流向戶口</th>
+                                <th class="py-2.5 px-2.5">備註與手續費</th>
+                                <th class="py-2.5 px-2.5 text-right">原幣金額</th>
+                                <th class="py-2.5 px-2 text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cashflow-table-body" class="divide-y divide-terminal-border/60 text-sm"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="shared-mobile-nav"></div>
+
+    <script src="app.js"></script>
+    <script>
+        window.CURRENT_PAGE_ID = 'cashflow';
+        const EXPENSE_CATEGORIES = ['日常餐飲', '住屋與水電', '交通與出行', '購物與娛樂', '投資認購扣款', '稅項與保險', '銀行/平台手續費', '其他支出'];
+        const INCOME_CATEGORIES = ['薪金收入', '債息/派息', '定存利息', '期貨/投資平倉', '股息/分紅', '其他入帳'];
+
+        function populateCashflowSelectors() {
+            const allOptionsHtml = window.db.accounts.map(a =>
+                `<option value="${a.id}">${a.category === 'broker' ? '📱' : '🏦'} ${a.institutionName} - ${a.subAccountName} (${a.currency})</option>`
+            ).join('');
+
+            document.getElementById('cf-account').innerHTML = allOptionsHtml;
+            document.getElementById('filter-cf-account').innerHTML = `<option value="ALL">全部銀行與平台戶口</option>` + allOptionsHtml;
+            document.getElementById('fx-from-account').innerHTML = allOptionsHtml;
+            document.getElementById('fx-fee-account').innerHTML = allOptionsHtml;
+            document.getElementById('fx-to-account').innerHTML = allOptionsHtml;
+            if (window.db.accounts.length > 2) {
+                document.getElementById('fx-to-account').selectedIndex = 2;
+            }
+
+            const codes = Object.keys(window.currencyRegistry);
+            const fxFeeCurr = document.getElementById('fx-fee-curr');
+            const prev = fxFeeCurr.value || 'HKD';
+            fxFeeCurr.innerHTML = codes.map(c => `<option value="${c}">${c}</option>`).join('');
+            fxFeeCurr.value = codes.includes(prev) ? prev : 'HKD';
+
+            syncCashflowAccountCurrency();
+        }
+
+        function setEntrySubMode(mode) {
+            const stdForm = document.getElementById('cashflow-form');
+            const fxForm = document.getElementById('fx-transfer-form');
+            const stdBtn = document.getElementById('submode-standard-btn');
+            const fxBtn = document.getElementById('submode-fx-btn');
+
+            if (mode === 'standard') {
+                stdForm.classList.remove('hidden');
+                fxForm.classList.add('hidden');
+                stdBtn.className = 'py-2 rounded-lg text-xs sm:text-sm font-bold bg-blue-600 text-white transition';
+                fxBtn.className = 'py-2 rounded-lg text-xs sm:text-sm font-bold text-terminal-muted hover:text-white transition';
+            } else {
+                stdForm.classList.add('hidden');
+                fxForm.classList.remove('hidden');
+                fxBtn.className = 'py-2 rounded-lg text-xs sm:text-sm font-bold bg-emerald-600 text-white transition';
+                stdBtn.className = 'py-2 rounded-lg text-xs sm:text-sm font-bold text-terminal-muted hover:text-white transition';
+                onFxAccountChange('from');
+                onFxAccountChange('to');
+            }
+        }
+
+        function updateCategoryOptions() {
+            const type = document.querySelector('input[name="cf-type"]:checked').value;
+            const catSelect = document.getElementById('cf-category');
+            const list = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+            catSelect.innerHTML = list.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+
+        function syncCashflowAccountCurrency() {
+            const acc = window.db.accounts.find(a => a.id === document.getElementById('cf-account').value);
+            if (acc) document.getElementById('cf-currency-label').textContent = acc.currency;
+        }
+
+        function handleAddCashflow(e) {
+            e.preventDefault();
+            const type = document.querySelector('input[name="cf-type"]:checked').value;
+            const accountId = document.getElementById('cf-account').value;
+            const acc = window.db.accounts.find(a => a.id === accountId);
+            const category = document.getElementById('cf-category').value;
+            const date = document.getElementById('cf-date').value;
+            const amount = parseFloat(document.getElementById('cf-amount').value);
+            const fee = parseFloat(document.getElementById('cf-fee').value) || 0;
+            const note = document.getElementById('cf-note').value.trim();
+
+            if (!acc || isNaN(amount) || amount <= 0) return;
+
+            window.db.cashflows.push({
+                id: 'cf_' + Date.now(), accountId, type, category, amount, fee,
+                feeCurrency: acc.currency, date, note: note || category
+            });
+
+            document.getElementById('cf-amount').value = '';
+            document.getElementById('cf-fee').value = '0';
+            document.getElementById('cf-note').value = '';
+            saveDatabase();
+            showToast(`已記錄 ${acc.currency} ${amount.toLocaleString()} (${category})`);
+        }
+
+        function onFxAccountChange(side) {
+            const fromAcc = window.db.accounts.find(a => a.id === document.getElementById('fx-from-account').value);
+            const toAcc = window.db.accounts.find(a => a.id === document.getElementById('fx-to-account').value);
+            if (fromAcc) {
+                document.getElementById('fx-from-curr').textContent = fromAcc.currency;
+                if (side === 'from') {
+                    document.getElementById('fx-fee-curr').value = fromAcc.currency;
+                    document.getElementById('fx-fee-account').value = fromAcc.id;
+                }
+            }
+            if (toAcc) document.getElementById('fx-to-curr').textContent = toAcc.currency;
+            autoCalcFxInflow();
+        }
+
+        function autoCalcFxInflow() {
+            const fromAcc = window.db.accounts.find(a => a.id === document.getElementById('fx-from-account').value);
+            const toAcc = window.db.accounts.find(a => a.id === document.getElementById('fx-to-account').value);
+            const fromAmt = parseFloat(document.getElementById('fx-from-amount').value);
+            if (!fromAcc || !toAcc || isNaN(fromAmt) || fromAmt <= 0) {
+                updateImpliedFxLabel();
+                return;
+            }
+            const estInflow = convertCurrency(fromAmt, fromAcc.currency, toAcc.currency);
+            if (estInflow !== null) document.getElementById('fx-to-amount').value = estInflow.toFixed(2);
+            updateImpliedFxLabel();
+        }
+
+        function updateImpliedFxLabel() {
+            const fromAcc = window.db.accounts.find(a => a.id === document.getElementById('fx-from-account').value);
+            const toAcc = window.db.accounts.find(a => a.id === document.getElementById('fx-to-account').value);
+            const fromAmt = parseFloat(document.getElementById('fx-from-amount').value);
+            const toAmt = parseFloat(document.getElementById('fx-to-amount').value);
+            const label = document.getElementById('fx-implied-rate');
+            if (fromAcc && toAcc && fromAmt > 0 && toAmt > 0) {
+                label.textContent = `成交匯率: 1 ${toAcc.currency} = ${(fromAmt / toAmt).toFixed(4)} ${fromAcc.currency}`;
+            } else {
+                label.textContent = '成交匯率: --';
+            }
+        }
+
+        function handleAddFxTransfer(e) {
+            e.preventDefault();
+            const fromAccountId = document.getElementById('fx-from-account').value;
+            const toAccountId = document.getElementById('fx-to-account').value;
+            if (fromAccountId === toAccountId) {
+                showToast('轉出與轉入戶口不能相同！', 'error');
+                return;
+            }
+            const fromAcc = window.db.accounts.find(a => a.id === fromAccountId);
+            const toAcc = window.db.accounts.find(a => a.id === toAccountId);
+            const fromAmount = parseFloat(document.getElementById('fx-from-amount').value);
+            const toAmount = parseFloat(document.getElementById('fx-to-amount').value);
+            const fee = parseFloat(document.getElementById('fx-fee-amount').value) || 0;
+            const feeCurrency = document.getElementById('fx-fee-curr').value;
+            const feeAccountId = document.getElementById('fx-fee-account').value;
+            const date = document.getElementById('fx-date').value;
+            const note = document.getElementById('fx-note').value.trim();
+
+            if (!fromAcc || !toAcc || isNaN(fromAmount) || isNaN(toAmount)) return;
+
+            window.db.cashflows.push({
+                id: 'cf_fx_' + Date.now(), type: 'transfer', fromAccountId, fromAmount, fromCurrency: fromAcc.currency,
+                toAccountId, toAmount, toCurrency: toAcc.currency, fxRate: +(fromAmount / toAmount).toFixed(4),
+                fee, feeCurrency, feeAccountId, date, note: note || `${fromAcc.currency} → ${toAcc.currency} 換匯轉帳`
+            });
+
+            document.getElementById('fx-from-amount').value = '';
+            document.getElementById('fx-to-amount').value = '';
+            document.getElementById('fx-fee-amount').value = '0';
+            document.getElementById('fx-note').value = '';
+            saveDatabase();
+            showToast(`換匯轉帳完成！手續費 ${feeCurrency} ${fee} 已獨立扣除`);
+        }
+
+        function deleteCashflow(id) {
+            window.db.cashflows = window.db.cashflows.filter(c => c.id !== id);
+            saveDatabase();
+            showToast('已刪除該筆紀錄並重新計算戶口餘額');
+        }
+
+        function renderCashflows() {
+            const filterType = document.getElementById('filter-cf-type').value;
+            const filterAcc = document.getElementById('filter-cf-account').value;
+            const tbody = document.getElementById('cashflow-table-body');
+
+            const filtered = window.db.cashflows
+                .filter(cf => {
+                    if (filterType !== 'ALL' && cf.type !== filterType) return false;
+                    if (filterAcc !== 'ALL') {
+                        if (cf.type === 'transfer') return cf.fromAccountId === filterAcc || cf.toAccountId === filterAcc;
+                        return cf.accountId === filterAcc;
+                    }
+                    return true;
+                })
+                .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-terminal-muted text-xs">尚無符合條件的交易紀錄</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(cf => {
+                if (cf.type === 'transfer') {
+                    const feeTag = cf.fee > 0
+                        ? `<span class="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-mono">手續費: -${cf.feeCurrency} ${cf.fee}</span>`
+                        : '';
+                    return `
+                        <tr class="hover:bg-terminal-hover/60 transition">
+                            <td class="py-3 px-2.5 whitespace-nowrap">
+                                <div class="font-mono text-xs text-terminal-muted">${cf.date}</div>
+                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-semibold">💱 換匯轉帳</span>
+                            </td>
+                            <td class="py-3 px-2.5 text-xs">
+                                <div class="text-rose-300">出: ${getAccountLabel(cf.fromAccountId)}</div>
+                                <div class="text-emerald-300 mt-0.5">入: ${getAccountLabel(cf.toAccountId)}</div>
+                            </td>
+                            <td class="py-3 px-2.5 text-xs text-terminal-muted">
+                                <div>${cf.note}</div>
+                                <div class="text-[10px] font-mono text-terminal-muted">匯率: ${cf.fxRate}</div>
+                                ${feeTag}
+                            </td>
+                            <td class="py-3 px-2.5 text-right font-mono text-xs tabular-nums whitespace-nowrap">
+                                <div class="text-rose-400">-${cf.fromCurrency} ${cf.fromAmount.toLocaleString()}</div>
+                                <div class="text-emerald-400 font-bold">+${cf.toCurrency} ${cf.toAmount.toLocaleString()}</div>
+                            </td>
+                            <td class="py-3 px-2 text-center"><button onclick="deleteCashflow('${cf.id}')" class="text-xs text-terminal-muted hover:text-rose-400">刪除</button></td>
+                        </tr>
+                    `;
+                }
+
+                const acc = window.db.accounts.find(a => a.id === cf.accountId);
+                const curr = acc ? acc.currency : 'HKD';
+                const isInc = cf.type === 'income';
+                const feeTag = cf.fee > 0
+                    ? `<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-mono">費: -${cf.feeCurrency || curr} ${cf.fee}</span>`
+                    : '';
+
+                return `
+                    <tr class="hover:bg-terminal-hover/60 transition">
+                        <td class="py-3 px-2.5 whitespace-nowrap">
+                            <div class="font-mono text-xs text-terminal-muted">${cf.date}</div>
+                            <span class="text-[10px] px-1.5 py-0.5 rounded ${isInc ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'} font-semibold">${isInc ? '+ 入帳' : '- 支帳'}</span>
+                        </td>
+                        <td class="py-3 px-2.5 text-xs text-white">${getAccountLabel(cf.accountId)}</td>
+                        <td class="py-3 px-2.5 text-xs text-terminal-muted"><span class="text-white font-medium">[${cf.category}]</span> ${cf.note}${feeTag}</td>
+                        <td class="py-3 px-2.5 text-right font-mono font-bold text-sm ${isInc ? 'text-terminal-up' : 'text-terminal-down'} tabular-nums whitespace-nowrap">${isInc ? '+' : '-'}${curr} ${cf.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td class="py-3 px-2 text-center"><button onclick="deleteCashflow('${cf.id}')" class="text-xs text-terminal-muted hover:text-rose-400">刪除</button></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        window.onPageDataUpdated = function() {
+            populateCashflowSelectors();
+            renderCashflows();
+        };
+
+        window.onload = function() {
+            const today = getRelativeDate(0);
+            document.getElementById('cf-date').value = today;
+            document.getElementById('fx-date').value = today;
+            updateCategoryOptions();
+            renderSharedChrome(window.CURRENT_PAGE_ID);
+            window.onPageDataUpdated();
+        };
+    </script>
+</body>
+</html>

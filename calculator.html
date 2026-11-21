@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0b0e14">
+    <title>三情境收益試算機 · FinPulse Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'Noto Sans TC', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: {
+                        terminal: {
+                            bg: '#0b0e14', card: '#131722', border: '#2a2e39', hover: '#1e222d',
+                            accent: '#2962ff', up: '#089981', down: '#f23645', warn: '#f59e0b',
+                            text: '#d1d4dc', muted: '#787b86'
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        body { background-color: #0b0e14; color: #d1d4dc; font-feature-settings: "tnum"; }
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+        .glass-header { background: rgba(19, 23, 34, 0.9); backdrop-filter: blur(12px); border-bottom: 1px solid #2a2e39; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col pb-24 md:pb-8">
+    <div id="shared-header"></div>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 pt-5 space-y-6">
+        <div id="shared-kpis"></div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- 左側：計算機主體 -->
+            <div class="lg:col-span-7 bg-terminal-card border border-terminal-border rounded-2xl p-4 sm:p-6 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-terminal-border">
+                    <div>
+                        <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                            <span>🧮 事前三情境收益試算機</span>
+                            <span class="text-[11px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">純本機演算 · 0 雲端讀寫</span>
+                        </h2>
+                        <p class="text-xs text-terminal-muted mt-0.5">選擇擬下單的股票 App 後自動帶入該平台手續費規則，計算最低/中價值/最高實收淨息</p>
+                    </div>
+                    <div class="flex items-center gap-1 bg-terminal-bg p-1 rounded-lg border border-terminal-border text-xs font-mono">
+                        <button type="button" onclick="setDayCountBasis(365)" id="basis-365" class="px-2.5 py-1 rounded bg-blue-600 text-white font-bold">365天制</button>
+                        <button type="button" onclick="setDayCountBasis(360)" id="basis-360" class="px-2.5 py-1 rounded text-terminal-muted hover:text-white">360美債制</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">擬下單平台 App (自動帶入幣別與預設手續費)</label>
+                        <select id="calc-account" onchange="applyAccountFeeDefaultToCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"></select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">商品類型</label>
+                        <select id="calc-type" onchange="runThreeScenarioCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                            <option value="treasury">🇺🇸 國債 / 短債 (Treasury)</option>
+                            <option value="ipo">🚀 IPO 認購 / 新股配售</option>
+                            <option value="futures">📊 期貨 / 結構性票據</option>
+                            <option value="deposit">🏦 銀行高息定存</option>
+                        </select>
+                    </div>
+
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs text-terminal-muted mb-1">試算方案名稱</label>
+                        <input type="text" id="calc-title" value="美債 6 個月期試算" oninput="runThreeScenarioCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">投入本金 / 認購金額 (<span id="calc-curr-label" class="font-mono text-blue-400">USD</span>)</label>
+                        <input type="number" id="calc-principal" value="50000" step="100" oninput="applyAccountFeeDefaultToCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono font-bold text-white focus:border-blue-500 focus:outline-none">
+                    </div>
+
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="text-xs text-terminal-muted">預估平台手續費 / 融資息</label>
+                            <span id="calc-fee-rule-hint" class="text-[10px] text-purple-400 font-mono">已套用平台預設</span>
+                        </div>
+                        <div class="flex gap-1.5">
+                            <input type="number" id="calc-fees" value="15" step="0.5" oninput="runThreeScenarioCalc()" class="flex-1 bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-amber-400 focus:border-blue-500 focus:outline-none">
+                            <span id="calc-fee-curr" class="px-2.5 py-2 rounded-xl bg-terminal-bg border border-terminal-border font-mono text-xs text-amber-400">USD</span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">預計開始日</label>
+                        <input type="date" id="calc-start" onchange="runThreeScenarioCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-white focus:border-blue-500 focus:outline-none">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">預計到期日 <span id="calc-days-badge" class="ml-1 text-blue-400 font-mono">(182 天)</span></label>
+                        <input type="date" id="calc-end" onchange="runThreeScenarioCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-white focus:border-blue-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <!-- 三組利率輸入 -->
+                <div class="bg-terminal-bg/80 border border-terminal-border rounded-2xl p-3.5 space-y-2.5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-white">📊 設定年化利率 / 預期回報率區間 (%)</span>
+                        <span class="text-[11px] text-terminal-muted">即時扣除手續費計算實收</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2.5">
+                        <div class="bg-terminal-card border border-rose-500/30 rounded-xl p-2.5">
+                            <label class="block text-[11px] text-rose-400 font-medium mb-1">最低保守 (%)</label>
+                            <input type="number" step="0.05" id="calc-rate-low" value="3.80" oninput="runThreeScenarioCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-lg px-2 py-1 text-sm sm:text-base font-mono font-bold text-rose-400 focus:outline-none">
+                        </div>
+                        <div class="bg-terminal-card border border-blue-500/40 rounded-xl p-2.5">
+                            <label class="block text-[11px] text-blue-400 font-medium mb-1">中價值基準 (%)</label>
+                            <input type="number" step="0.05" id="calc-rate-mid" value="4.35" oninput="runThreeScenarioCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-lg px-2 py-1 text-sm sm:text-base font-mono font-bold text-blue-400 focus:outline-none">
+                        </div>
+                        <div class="bg-terminal-card border border-emerald-500/30 rounded-xl p-2.5">
+                            <label class="block text-[11px] text-emerald-400 font-medium mb-1">最高樂觀 (%)</label>
+                            <input type="number" step="0.05" id="calc-rate-high" value="4.90" oninput="runThreeScenarioCalc()" class="w-full bg-terminal-bg border border-terminal-border rounded-lg px-2 py-1 text-sm sm:text-base font-mono font-bold text-emerald-400 focus:outline-none">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 三情境即時結果 -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="rounded-xl bg-terminal-bg border border-rose-500/30 p-3">
+                        <div class="text-xs text-rose-400 font-semibold mb-1">保守情境 (最低)</div>
+                        <div class="text-[11px] text-terminal-muted">毛息：<span id="res-gross-low" class="font-mono text-terminal-text">$0</span></div>
+                        <div class="mt-2 pt-2 border-t border-terminal-border">
+                            <div class="text-[10px] text-terminal-muted">實收淨息 (淨年化 <span id="res-apy-low" class="font-mono">0%</span>)</div>
+                            <div id="res-net-low" class="text-base sm:text-lg font-bold font-mono text-rose-400 tabular-nums">+$0.00</div>
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl bg-blue-950/20 border border-blue-500/50 p-3 relative">
+                        <span class="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-bold">基準</span>
+                        <div class="text-xs text-blue-400 font-semibold mb-1">中價值情境 (基準)</div>
+                        <div class="text-[11px] text-terminal-muted">毛息：<span id="res-gross-mid" class="font-mono text-terminal-text">$0</span></div>
+                        <div class="mt-2 pt-2 border-t border-terminal-border">
+                            <div class="text-[10px] text-terminal-muted">實收淨息 (淨年化 <span id="res-apy-mid" class="font-mono">0%</span>)</div>
+                            <div id="res-net-mid" class="text-base sm:text-lg font-bold font-mono text-blue-400 tabular-nums">+$0.00</div>
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl bg-terminal-bg border border-emerald-500/30 p-3">
+                        <div class="text-xs text-emerald-400 font-semibold mb-1">樂觀情境 (最高)</div>
+                        <div class="text-[11px] text-terminal-muted">毛息：<span id="res-gross-high" class="font-mono text-terminal-text">$0</span></div>
+                        <div class="mt-2 pt-2 border-t border-terminal-border">
+                            <div class="text-[10px] text-terminal-muted">實收淨息 (淨年化 <span id="res-apy-high" class="font-mono">0%</span>)</div>
+                            <div id="res-net-high" class="text-base sm:text-lg font-bold font-mono text-emerald-400 tabular-nums">+$0.00</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap gap-2.5 pt-1">
+                    <button type="button" onclick="saveCalcDraftToLocal()" class="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs sm:text-sm shadow-lg transition">
+                        💾 暫存至本機草稿 (附日期 · 零雲端流量)
+                    </button>
+                    <button type="button" onclick="promoteCurrentCalcToHolding()" class="py-2.5 px-4 rounded-xl bg-terminal-hover hover:bg-blue-600 border border-terminal-border text-white font-semibold text-xs sm:text-sm transition">
+                        直接轉為正式持倉 →
+                    </button>
+                </div>
+            </div>
+
+            <!-- 右側：本機試算草稿清單 -->
+            <div class="lg:col-span-5 bg-terminal-card border border-terminal-border rounded-2xl p-4 sm:p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-3 pb-3 border-b border-terminal-border">
+                    <div>
+                        <h3 class="text-base font-bold text-white">🗂️ 本機試算暫存清單 (LocalStorage)</h3>
+                        <p class="text-xs text-terminal-muted mt-0.5">保留日期、歸屬平台與三情境淨息，不佔用 Google Cloud 額度</p>
+                    </div>
+                    <span id="draft-count-badge" class="text-xs font-mono px-2 py-1 rounded bg-terminal-bg border border-terminal-border text-amber-400">0 筆</span>
+                </div>
+                <div id="calc-drafts-list" class="space-y-3 overflow-y-auto max-h-[560px] pr-1"></div>
+            </div>
+        </div>
+    </main>
+
+    <div id="shared-mobile-nav"></div>
+
+    <script src="app.js"></script>
+    <script>
+        window.CURRENT_PAGE_ID = 'calculator';
+        let calcDayBasis = 365;
+
+        function populateCalcAccounts() {
+            const sortedBrokersFirst = [...window.db.accounts].sort((a, b) => (a.category === 'broker' ? -1 : 1));
+            document.getElementById('calc-account').innerHTML = sortedBrokersFirst.map(a =>
+                `<option value="${a.id}">${a.category === 'broker' ? '📱 [平台]' : '🏦 [銀行]'} ${a.institutionName} - ${a.subAccountName} (${a.currency})</option>`
+            ).join('');
+            applyAccountFeeDefaultToCalc();
+        }
+
+        function applyAccountFeeDefaultToCalc() {
+            const acc = window.db.accounts.find(a => a.id === document.getElementById('calc-account').value);
+            if (!acc) return;
+            document.getElementById('calc-curr-label').textContent = acc.currency;
+            document.getElementById('calc-fee-curr').textContent = acc.currency;
+            const principal = parseFloat(document.getElementById('calc-principal').value) || 0;
+            document.getElementById('calc-fees').value = calculateAccountDefaultFee(acc, principal);
+            document.getElementById('calc-fee-rule-hint').textContent = (acc.feeRule && (acc.feeRule.flat > 0 || acc.feeRule.pct > 0))
+                ? `已套用 ${acc.institutionName} 規則`
+                : '該平台無預設手續費';
+            runThreeScenarioCalc();
+        }
+
+        function setDayCountBasis(basis) {
+            calcDayBasis = basis;
+            document.getElementById('basis-365').className = basis === 365 ? 'px-2.5 py-1 rounded bg-blue-600 text-white font-bold' : 'px-2.5 py-1 rounded text-terminal-muted hover:text-white';
+            document.getElementById('basis-360').className = basis === 360 ? 'px-2.5 py-1 rounded bg-blue-600 text-white font-bold' : 'px-2.5 py-1 rounded text-terminal-muted hover:text-white';
+            runThreeScenarioCalc();
+        }
+
+        function getCalcSnapshot() {
+            const accountId = document.getElementById('calc-account').value;
+            const acc = window.db.accounts.find(a => a.id === accountId);
+            const currency = acc ? acc.currency : 'USD';
+            const title = document.getElementById('calc-title').value.trim() || '未命名試算方案';
+            const assetType = document.getElementById('calc-type').value;
+            const principal = parseFloat(document.getElementById('calc-principal').value) || 0;
+            const fees = parseFloat(document.getElementById('calc-fees').value) || 0;
+            const startDate = document.getElementById('calc-start').value;
+            const targetDate = document.getElementById('calc-end').value;
+            const low = parseFloat(document.getElementById('calc-rate-low').value) || 0;
+            const mid = parseFloat(document.getElementById('calc-rate-mid').value) || 0;
+            const high = parseFloat(document.getElementById('calc-rate-high').value) || 0;
+            const days = Math.max(1, Math.round((new Date(targetDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)) || 1);
+
+            const calcScenario = (rate) => {
+                const gross = principal * (rate / 100) * (days / calcDayBasis);
+                const net = gross - fees;
+                const netApy = principal > 0 ? ((net / principal) * (calcDayBasis / days) * 100) : 0;
+                return { gross, net, netApy };
+            };
+
+            const sLow = calcScenario(low);
+            const sMid = calcScenario(mid);
+            const sHigh = calcScenario(high);
+
+            return {
+                accountId, currency, title, assetType, principal, fees, startDate, targetDate, days, basis: calcDayBasis,
+                rates: { low, mid, high },
+                results: {
+                    grossLow: sLow.gross, netLow: sLow.net, apyLow: sLow.netApy,
+                    grossMid: sMid.gross, netMid: sMid.net, apyMid: sMid.netApy,
+                    grossHigh: sHigh.gross, netHigh: sHigh.net, apyHigh: sHigh.netApy
+                }
+            };
+        }
+
+        function runThreeScenarioCalc() {
+            const snap = getCalcSnapshot();
+            const sym = getCurrencySymbol(snap.currency);
+            document.getElementById('calc-days-badge').textContent = `(${snap.days} 天)`;
+
+            document.getElementById('res-gross-low').textContent = `${sym}${snap.results.grossLow.toFixed(2)}`;
+            document.getElementById('res-net-low').textContent = `${snap.results.netLow >= 0 ? '+' : ''}${sym}${snap.results.netLow.toFixed(2)}`;
+            document.getElementById('res-apy-low').textContent = `${snap.results.apyLow.toFixed(2)}%`;
+
+            document.getElementById('res-gross-mid').textContent = `${sym}${snap.results.grossMid.toFixed(2)}`;
+            document.getElementById('res-net-mid').textContent = `${snap.results.netMid >= 0 ? '+' : ''}${sym}${snap.results.netMid.toFixed(2)}`;
+            document.getElementById('res-apy-mid').textContent = `${snap.results.apyMid.toFixed(2)}%`;
+
+            document.getElementById('res-gross-high').textContent = `${sym}${snap.results.grossHigh.toFixed(2)}`;
+            document.getElementById('res-net-high').textContent = `${snap.results.netHigh >= 0 ? '+' : ''}${sym}${snap.results.netHigh.toFixed(2)}`;
+            document.getElementById('res-apy-high').textContent = `${snap.results.apyHigh.toFixed(2)}%`;
+        }
+
+        function saveCalcDraftToLocal() {
+            const snap = getCalcSnapshot();
+            const draft = { draftId: 'sim_' + Date.now(), savedDate: getRelativeDate(0), ...snap };
+            window.db.simDrafts.unshift(draft);
+            saveDatabase();
+            showToast(`已暫存至本機 (${draft.savedDate})，零雲端讀寫消耗！`);
+        }
+
+        function deleteSimDraft(draftId) {
+            window.db.simDrafts = window.db.simDrafts.filter(d => d.draftId !== draftId);
+            saveDatabase();
+            showToast('已刪除該筆本機試算草稿');
+        }
+
+        function promoteDraftToHolding(draft) {
+            localStorage.setItem(PROMOTE_DRAFT_KEY, JSON.stringify(draft));
+            window.location.href = 'holdings.html';
+        }
+
+        function promoteCurrentCalcToHolding() {
+            const snap = getCalcSnapshot();
+            snap.savedDate = getRelativeDate(0);
+            promoteDraftToHolding(snap);
+        }
+
+        function renderSimDrafts() {
+            const list = document.getElementById('calc-drafts-list');
+            document.getElementById('draft-count-badge').textContent = `${window.db.simDrafts.length} 筆`;
+
+            if (window.db.simDrafts.length === 0) {
+                list.innerHTML = `<div class="py-10 text-center text-xs text-terminal-muted">尚無本機試算草稿，在左側試算後按「暫存至本機草稿」即可保留帶日期紀錄。</div>`;
+                return;
+            }
+
+            list.innerHTML = window.db.simDrafts.map(d => {
+                const curr = d.currency || 'USD';
+                const accLabel = d.accountId ? getAccountLabel(d.accountId) : '未指定平台';
+                return `
+                    <div class="bg-terminal-bg border border-terminal-border rounded-xl p-3.5 space-y-2">
+                        <div class="flex items-start justify-between gap-2">
+                            <div>
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">試算日: ${d.savedDate}</span>
+                                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300">${curr}</span>
+                                    <span class="text-[10px] font-mono text-terminal-muted">${d.days}天 · ${d.basis}制</span>
+                                </div>
+                                <h4 class="font-bold text-white text-sm mt-1">${d.title}</h4>
+                                <div class="text-[11px] text-terminal-muted">${accLabel}</div>
+                            </div>
+                            <button onclick="deleteSimDraft('${d.draftId}')" class="text-xs text-terminal-muted hover:text-rose-400">✕</button>
+                        </div>
+
+                        <div class="text-xs text-terminal-muted flex justify-between font-mono">
+                            <span>本金: ${curr} ${d.principal.toLocaleString()}</span>
+                            <span>手續費: ${curr} ${d.fees}</span>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-1.5 text-center font-mono text-xs bg-terminal-card p-2 rounded-lg border border-terminal-border">
+                            <div>
+                                <div class="text-[10px] text-rose-400">低 (${d.rates.low}%)</div>
+                                <div class="font-bold text-rose-400">+${d.results.netLow.toFixed(0)}</div>
+                            </div>
+                            <div class="border-x border-terminal-border">
+                                <div class="text-[10px] text-blue-400">中 (${d.rates.mid}%)</div>
+                                <div class="font-bold text-blue-400">+${d.results.netMid.toFixed(0)}</div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] text-emerald-400">高 (${d.rates.high}%)</div>
+                                <div class="font-bold text-emerald-400">+${d.results.netHigh.toFixed(0)}</div>
+                            </div>
+                        </div>
+
+                        <button onclick='promoteDraftToHolding(${JSON.stringify(d).replace(/'/g, "&#39;")})' class="w-full py-1.5 rounded-lg bg-terminal-hover hover:bg-blue-600 text-xs font-medium text-white border border-terminal-border transition">
+                            一鍵跳轉並轉為正式持倉 →
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        window.onPageDataUpdated = function() {
+            populateCalcAccounts();
+            renderSimDrafts();
+        };
+
+        window.onload = function() {
+            document.getElementById('calc-start').value = getRelativeDate(0);
+            document.getElementById('calc-end').value = getRelativeDate(182);
+            renderSharedChrome(window.CURRENT_PAGE_ID);
+            window.onPageDataUpdated();
+        };
+    </script>
+</body>
+</html>

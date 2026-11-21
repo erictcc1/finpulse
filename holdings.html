@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0b0e14">
+    <title>國債 / 定存 / 期貨持倉 · FinPulse Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'Noto Sans TC', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: {
+                        terminal: {
+                            bg: '#0b0e14', card: '#131722', border: '#2a2e39', hover: '#1e222d',
+                            accent: '#2962ff', up: '#089981', down: '#f23645', warn: '#f59e0b',
+                            text: '#d1d4dc', muted: '#787b86'
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        body { background-color: #0b0e14; color: #d1d4dc; font-feature-settings: "tnum"; }
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+        .glass-header { background: rgba(19, 23, 34, 0.9); backdrop-filter: blur(12px); border-bottom: 1px solid #2a2e39; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col pb-24 md:pb-8">
+    <div id="shared-header"></div>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 pt-5 space-y-6">
+        <div id="shared-kpis"></div>
+
+        <!-- 登記已購入持倉表單 -->
+        <section class="bg-terminal-card border border-terminal-border rounded-2xl p-4 sm:p-5">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-terminal-border">
+                <div>
+                    <h2 class="text-base sm:text-lg font-bold text-white">🏛️ 登記已購入持倉（國債 / 定存 / 期貨 / IPO）</h2>
+                    <p class="text-xs text-terminal-muted mt-0.5">選擇投資平台 App 後會自動帶入該平台幣別與預設手續費，並精準追蹤到期日與實際購入成本</p>
+                </div>
+            </div>
+
+            <form id="holding-form" onsubmit="handleAddHolding(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-xs text-terminal-muted mb-1">歸屬投資平台 App <span class="text-blue-400">*</span></label>
+                    <select id="hd-account" onchange="applyAccountFeeDefaultToHolding()" required class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"></select>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-terminal-muted mb-1">商品類型</label>
+                    <select id="hd-type" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                        <option value="treasury">🇺🇸 國債 / 政府債券 (Treasury)</option>
+                        <option value="deposit">🏦 定期存款 (Time Deposit)</option>
+                        <option value="futures">📊 期貨合約 / 票據 (Futures)</option>
+                        <option value="ipo">🚀 IPO 認購 / 新股配售</option>
+                    </select>
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label class="block text-xs text-terminal-muted mb-1">標的名稱 / 代號 <span class="text-blue-400">*</span></label>
+                    <input type="text" id="hd-name" required placeholder="例如：US Treasury 2Y 或 富達美元3個月定存" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-terminal-muted mb-1">面值 / 到期領回本金 (<span id="hd-curr-1" class="font-mono text-blue-400">USD</span>)</label>
+                    <input type="number" step="0.01" id="hd-principal" oninput="autoCalcHoldingActualCost()" required placeholder="10000" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-white focus:border-blue-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-terminal-muted mb-1">購入報價 (例如 98.50)</label>
+                    <input type="number" step="0.0001" id="hd-purchase-price" value="100" oninput="autoCalcHoldingActualCost()" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-white focus:border-blue-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-terminal-muted mb-1">App 交易手續費 (<span id="hd-fee-curr-label" class="font-mono text-amber-400">USD</span>)</label>
+                    <input type="number" step="0.01" id="hd-broker-fee" value="0" oninput="autoCalcHoldingActualCost()" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-amber-400 focus:border-blue-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-terminal-muted mb-1">實際購入總成本 (含手續費/應計息) <span class="text-amber-400">*</span></label>
+                    <input type="number" step="0.01" id="hd-actual-cost" required placeholder="9865.50" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono font-bold text-white focus:border-blue-500 focus:outline-none">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">息率 Coupon %</label>
+                        <input type="number" step="0.01" id="hd-coupon" required placeholder="4.25" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-2.5 py-2 text-sm font-mono text-white focus:border-blue-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-terminal-muted mb-1">孳息率 YTM %</label>
+                        <input type="number" step="0.01" id="hd-yield" required placeholder="4.65" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-2.5 py-2 text-sm font-mono text-white focus:border-blue-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-terminal-muted mb-1">開始日 (起息日)</label>
+                    <input type="date" id="hd-start-date" required class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-white focus:border-blue-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-terminal-muted mb-1">到期日 (Maturity Date) <span class="text-amber-400">*</span></label>
+                    <input type="date" id="hd-maturity-date" required class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm font-mono text-white focus:border-blue-500 focus:outline-none">
+                </div>
+
+                <div class="flex flex-col justify-between">
+                    <label class="block text-xs text-terminal-muted mb-1">派息日備註</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="hd-payout-note" placeholder="如: 05-15 / 11-15" class="w-full bg-terminal-bg border border-terminal-border rounded-xl px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                        <button type="submit" class="shrink-0 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg transition">+ 儲存</button>
+                    </div>
+                </div>
+            </form>
+        </section>
+
+        <!-- 平台篩選與持倉卡片 -->
+        <section class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <h3 class="text-base font-bold text-white">📊 持倉部位總覽（按投資平台分類）</h3>
+                <div id="platform-filter-pills" class="flex flex-wrap gap-2"></div>
+            </div>
+            <div id="holdings-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </section>
+    </main>
+
+    <div id="shared-mobile-nav"></div>
+
+    <script src="app.js"></script>
+    <script>
+        window.CURRENT_PAGE_ID = 'holdings';
+        let currentPlatformFilter = 'ALL';
+
+        function populateHoldingAccounts() {
+            const sortedBrokersFirst = [...window.db.accounts].sort((a, b) => (a.category === 'broker' ? -1 : 1));
+            document.getElementById('hd-account').innerHTML = sortedBrokersFirst.map(a =>
+                `<option value="${a.id}">${a.category === 'broker' ? '📱 [平台]' : '🏦 [銀行]'} ${a.institutionName} - ${a.subAccountName} (${a.currency})</option>`
+            ).join('');
+            applyAccountFeeDefaultToHolding();
+        }
+
+        function applyAccountFeeDefaultToHolding() {
+            const acc = window.db.accounts.find(a => a.id === document.getElementById('hd-account').value);
+            if (!acc) return;
+            document.getElementById('hd-curr-1').textContent = acc.currency;
+            document.getElementById('hd-fee-curr-label').textContent = acc.currency;
+            const principal = parseFloat(document.getElementById('hd-principal').value) || 0;
+            document.getElementById('hd-broker-fee').value = calculateAccountDefaultFee(acc, principal);
+            autoCalcHoldingActualCost();
+        }
+
+        function autoCalcHoldingActualCost() {
+            const principal = parseFloat(document.getElementById('hd-principal').value) || 0;
+            const price = parseFloat(document.getElementById('hd-purchase-price').value) || 100;
+            const fee = parseFloat(document.getElementById('hd-broker-fee').value) || 0;
+            if (principal > 0) {
+                document.getElementById('hd-actual-cost').value = ((principal * (price / 100)) + fee).toFixed(2);
+            }
+        }
+
+        function handleAddHolding(e) {
+            e.preventDefault();
+            const accountId = document.getElementById('hd-account').value;
+            const assetType = document.getElementById('hd-type').value;
+            const name = document.getElementById('hd-name').value.trim();
+            const principal = parseFloat(document.getElementById('hd-principal').value);
+            const purchasePrice = parseFloat(document.getElementById('hd-purchase-price').value) || 100;
+            const brokerFee = parseFloat(document.getElementById('hd-broker-fee').value) || 0;
+            const actualCost = parseFloat(document.getElementById('hd-actual-cost').value);
+            const couponRate = parseFloat(document.getElementById('hd-coupon').value) || 0;
+            const yieldRate = parseFloat(document.getElementById('hd-yield').value) || 0;
+            const startDate = document.getElementById('hd-start-date').value;
+            const maturityDate = document.getElementById('hd-maturity-date').value;
+            const payoutNote = document.getElementById('hd-payout-note').value.trim();
+
+            if (!accountId || !name || isNaN(principal) || isNaN(actualCost)) return;
+
+            window.db.holdings.push({
+                id: 'hd_' + Date.now(), accountId, assetType, name, principal, purchasePrice,
+                brokerFee, actualCost, couponRate, yieldRate, startDate, maturityDate,
+                payoutNote: payoutNote || '到期一次結算'
+            });
+
+            document.getElementById('holding-form').reset();
+            document.getElementById('hd-purchase-price').value = '100';
+            document.getElementById('hd-start-date').value = getRelativeDate(0);
+            document.getElementById('hd-maturity-date').value = getRelativeDate(180);
+            saveDatabase();
+            showToast(`已新增持倉：${name}`);
+        }
+
+        function settleHoldingMaturity(id) {
+            const h = window.db.holdings.find(item => item.id === id);
+            if (!h) return;
+            const acc = window.db.accounts.find(a => a.id === h.accountId);
+            const totalDays = Math.max(1, Math.ceil((new Date(h.maturityDate) - new Date(h.startDate)) / (1000 * 60 * 60 * 24)));
+            const estNetProfit = +((h.principal - h.actualCost) + (h.principal * (h.couponRate / 100) * (totalDays / 365))).toFixed(2);
+
+            window.db.cashflows.push({
+                id: 'cf_mat_' + Date.now(), accountId: h.accountId, type: 'income', category: '債息/派息',
+                amount: Math.max(0, estNetProfit), fee: 0, feeCurrency: acc ? acc.currency : 'USD',
+                date: getRelativeDate(0), note: `[到期結算] ${h.name} 淨收益入帳`
+            });
+
+            window.db.holdings = window.db.holdings.filter(item => item.id !== id);
+            saveDatabase();
+            showToast(`已完成到期結算！淨賺 ${acc ? acc.currency : ''} ${estNetProfit} 已計入該平台現金流`);
+        }
+
+        function deleteHolding(id) {
+            window.db.holdings = window.db.holdings.filter(h => h.id !== id);
+            saveDatabase();
+            showToast('已移除該筆持倉');
+        }
+
+        function setPlatformFilter(platformId) {
+            currentPlatformFilter = platformId;
+            renderHoldings();
+        }
+
+        function renderHoldings() {
+            const pillsContainer = document.getElementById('platform-filter-pills');
+            const usedAccIds = [...new Set(window.db.holdings.map(h => h.accountId))];
+
+            let pillsHtml = `<button onclick="setPlatformFilter('ALL')" class="px-3 py-1.5 rounded-lg text-xs font-medium border transition ${currentPlatformFilter === 'ALL' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-terminal-card border-terminal-border text-terminal-muted hover:text-white'}">全部平台 (${window.db.holdings.length})</button>`;
+
+            usedAccIds.forEach(accId => {
+                const acc = window.db.accounts.find(a => a.id === accId);
+                if (!acc) return;
+                const count = window.db.holdings.filter(h => h.accountId === accId).length;
+                const active = currentPlatformFilter === accId;
+                pillsHtml += `<button onclick="setPlatformFilter('${accId}')" class="px-3 py-1.5 rounded-lg text-xs font-medium border transition ${active ? 'bg-purple-600 border-purple-500 text-white' : 'bg-terminal-card border-terminal-border text-terminal-muted hover:text-white'}">${acc.institutionName} (${count})</button>`;
+            });
+            pillsContainer.innerHTML = pillsHtml;
+
+            const grid = document.getElementById('holdings-grid');
+            const filtered = window.db.holdings.filter(h => currentPlatformFilter === 'ALL' || h.accountId === currentPlatformFilter);
+
+            if (filtered.length === 0) {
+                grid.innerHTML = `<div class="col-span-full bg-terminal-card border border-terminal-border rounded-2xl p-8 text-center text-terminal-muted text-sm">尚無持倉紀錄，請在上方登記或由試算機轉入。</div>`;
+                return;
+            }
+
+            const typeLabels = {
+                treasury: { label: '國債 Treasury', cls: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
+                deposit: { label: '定存 Deposit', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
+                futures: { label: '期貨 Futures', cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+                ipo: { label: 'IPO 認購', cls: 'bg-purple-500/15 text-purple-400 border-purple-500/30' }
+            };
+
+            grid.innerHTML = filtered.map(h => {
+                const acc = window.db.accounts.find(a => a.id === h.accountId);
+                const curr = acc ? acc.currency : 'USD';
+                const platformName = acc ? `${acc.institutionName} · ${acc.subAccountName}` : '未指定平台';
+                const tInfo = typeLabels[h.assetType] || typeLabels.treasury;
+
+                const daysLeft = Math.ceil((new Date(h.maturityDate) - new Date()) / (1000 * 60 * 60 * 24));
+                const totalDays = Math.max(1, Math.ceil((new Date(h.maturityDate) - new Date(h.startDate)) / (1000 * 60 * 60 * 24)));
+                const estTotalProfit = (h.principal - h.actualCost) + (h.principal * (h.couponRate / 100) * (totalDays / 365));
+
+                const convertedProfitNote = (window.currencyDisplayMode === 'converted' && curr !== window.baseCurrency)
+                    ? (() => {
+                        const conv = convertCurrency(estTotalProfit, curr, window.baseCurrency);
+                        return conv === null
+                            ? `<span class="block text-[10px] text-rose-400">未設匯率 / 匯率待填</span>`
+                            : `<span class="block text-[10px] text-terminal-muted">≈ ${formatMoney(conv, window.baseCurrency, 0)}</span>`;
+                    })()
+                    : '';
+
+                const daysBadge = daysLeft <= 0
+                    ? `<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono text-xs font-bold">已到期</span>`
+                    : `<span class="px-2 py-0.5 rounded ${daysLeft <= 30 ? 'bg-amber-500/20 text-amber-400' : 'bg-terminal-bg text-terminal-text'} border border-terminal-border font-mono text-xs">剩餘 ${daysLeft} 天</span>`;
+
+                return `
+                    <div class="bg-terminal-card border border-terminal-border rounded-2xl p-4 sm:p-5 flex flex-col justify-between hover:border-blue-500/40 transition">
+                        <div>
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[11px] px-2 py-0.5 rounded border ${tInfo.cls} font-medium">${tInfo.label}</span>
+                                    <span class="text-xs text-purple-300 font-medium">📱 ${platformName}</span>
+                                </div>
+                                ${daysBadge}
+                            </div>
+
+                            <h4 class="font-bold text-white text-base mb-3">${h.name}</h4>
+
+                            <div class="grid grid-cols-3 gap-2 bg-terminal-bg rounded-xl p-3 border border-terminal-border text-xs">
+                                <div>
+                                    <div class="text-terminal-muted text-[11px]">面值 / 本金</div>
+                                    <div class="font-mono font-bold text-white mt-0.5">${curr} ${h.principal.toLocaleString()}</div>
+                                </div>
+                                <div>
+                                    <div class="text-terminal-muted text-[11px]">實際購入成本</div>
+                                    <div class="font-mono font-bold text-amber-400 mt-0.5">${curr} ${h.actualCost.toLocaleString()}</div>
+                                </div>
+                                <div>
+                                    <div class="text-terminal-muted text-[11px]">預估到期淨賺</div>
+                                    <div class="font-mono font-bold text-terminal-up mt-0.5">+${curr} ${estTotalProfit.toFixed(2)}</div>
+                                    ${convertedProfitNote}
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-3 text-xs">
+                                <div class="flex justify-between"><span class="text-terminal-muted">息率 / 孳息率：</span><span class="font-mono text-white">${h.couponRate}% / <span class="text-emerald-400 font-bold">${h.yieldRate}%</span></span></div>
+                                <div class="flex justify-between"><span class="text-terminal-muted">平台手續費：</span><span class="font-mono text-amber-400">${curr} ${(h.brokerFee || 0).toFixed(2)}</span></div>
+                                <div class="flex justify-between"><span class="text-terminal-muted">開始日：</span><span class="font-mono text-terminal-text">${h.startDate}</span></div>
+                                <div class="flex justify-between"><span class="text-terminal-muted">到期日：</span><span class="font-mono text-amber-300 font-semibold">${h.maturityDate}</span></div>
+                            </div>
+                        </div>
+
+                        <div class="mt-3 pt-2.5 border-t border-terminal-border flex items-center justify-between gap-2 text-xs">
+                            <span class="text-terminal-muted truncate">📅 ${h.payoutNote}</span>
+                            <div class="flex items-center gap-2 shrink-0">
+                                <button onclick="settleHoldingMaturity('${h.id}')" class="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 transition">到期結算入帳</button>
+                                <button onclick="deleteHolding('${h.id}')" class="text-terminal-muted hover:text-rose-400">移除</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 若由試算機頁面一鍵轉入，自動預填表單
+        function checkPromotedDraftFromCalc() {
+            try {
+                const raw = localStorage.getItem(PROMOTE_DRAFT_KEY);
+                if (!raw) return;
+                const draft = JSON.parse(raw);
+                localStorage.removeItem(PROMOTE_DRAFT_KEY);
+
+                if (draft.accountId) document.getElementById('hd-account').value = draft.accountId;
+                applyAccountFeeDefaultToHolding();
+
+                document.getElementById('hd-type').value = draft.assetType || 'treasury';
+                document.getElementById('hd-name').value = draft.title || '';
+                document.getElementById('hd-principal').value = draft.principal || '';
+                document.getElementById('hd-purchase-price').value = 100;
+                document.getElementById('hd-broker-fee').value = draft.fees || 0;
+                document.getElementById('hd-actual-cost').value = ((draft.principal || 0) + (draft.fees || 0)).toFixed(2);
+                document.getElementById('hd-coupon').value = draft.rates ? draft.rates.mid : '';
+                document.getElementById('hd-yield').value = draft.rates ? draft.rates.mid : '';
+                if (draft.startDate) document.getElementById('hd-start-date').value = draft.startDate;
+                if (draft.targetDate) document.getElementById('hd-maturity-date').value = draft.targetDate;
+                document.getElementById('hd-payout-note').value = `由 ${draft.savedDate || getRelativeDate(0)} 試算草稿轉入`;
+
+                showToast('已自動帶入試算草稿數據，確認後按「+ 儲存」即可寫入持倉！');
+            } catch (e) {}
+        }
+
+        window.onPageDataUpdated = function() {
+            populateHoldingAccounts();
+            renderHoldings();
+        };
+
+        window.onload = function() {
+            document.getElementById('hd-start-date').value = getRelativeDate(0);
+            document.getElementById('hd-maturity-date').value = getRelativeDate(180);
+            renderSharedChrome(window.CURRENT_PAGE_ID);
+            window.onPageDataUpdated();
+            checkPromotedDraftFromCalc();
+        };
+    </script>
+</body>
+</html>
