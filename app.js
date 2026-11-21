@@ -822,7 +822,8 @@ function renderGlobalKPIs() {
         const acc = window.db.accounts.find(a => a.id === h.accountId);
         const curr = acc ? acc.currency : 'USD';
         const totalDays = Math.max(1, Math.ceil((new Date(h.maturityDate) - new Date(h.startDate)) / (1000 * 60 * 60 * 24)));
-        const profit = (h.principal - h.actualCost) + (h.principal * (h.couponRate / 100) * (totalDays / 365));
+        const couponDec = (Math.round((Number(h.couponRate || 0) + Number.EPSILON) * 1e7) / 1e7) / 100;
+        const profit = (h.principal - h.actualCost) + (h.principal * couponDec * (totalDays / 365));
 
         investByCurr[curr] = (investByCurr[curr] || 0) + h.actualCost;
         profitByCurr[curr] = (profitByCurr[curr] || 0) + profit;
