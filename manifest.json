@@ -1,0 +1,18 @@
+{
+  "name": "FinPulse Pro · 資金定位與看盤總覽",
+  "short_name": "FinPulse Pro",
+  "description": "多幣別資產定位、現金流記帳、國債定存持倉與三情境試算儀表板",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "./logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
