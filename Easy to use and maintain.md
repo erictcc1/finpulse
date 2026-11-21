@@ -1,7 +1,5 @@
 # FinPulse Pro · GitHub Pages 上線核對與日常維護清單
 
-恭喜你已完成檔案上傳！建議按以下 4 個步驟做一次快速驗收：
-
 ## 1. 開啟 GitHub Pages 網址
 1. 進入你的 GitHub 倉庫 → 點擊上方 **Settings** → 左側選單點選 **Pages**。
 2. 確認 **Build and deployment** 的 **Branch** 已設為 `main`（根目錄 `/ (root)`），上方出現綠色提示與網址：`https://<你的帳號>.github.io/<你的倉庫名稱>/`。
